@@ -2,37 +2,43 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-import os
-import json
 
 app = Flask(__name__)
 CORS(app)
-
-# Define Google API scopes
+# Google Forms + Drive API scopes
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/forms.body",
     "https://www.googleapis.com/auth/forms.responses.readonly"
 ]
 
-# Load credentials from environment variable (secured)
-creds = service_account.Credentials.from_service_account_info(
-    json.loads(os.environ["GOOGLE_CREDENTIALS"]), scopes=SCOPES
+# Load credentials from downloaded service account file
+SERVICE_ACCOUNT_FILE = "credentials.json"  # Make sure this file is in the same folder
+
+# Authenticate with Google
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES
 )
 
+# Test route to check if backend is working
 @app.route("/")
 def home():
     return "✅ Formlo backend is running!"
 
+# Main route to generate form
 @app.route("/generate_form", methods=["POST"])
 def generate_form():
     data = request.get_json()
     mcq_text = data.get("text", "")
 
     try:
+        # Parse text into questions
         questions = parse_mcqs(mcq_text)
+
+        # Initialize Google Forms API
         service = build("forms", "v1", credentials=creds)
 
+        # Create an empty form first
         form_data = {
             "info": {
                 "title": "Formlo Quiz",
@@ -42,6 +48,7 @@ def generate_form():
         created_form = service.forms().create(body=form_data).execute()
         form_id = created_form["formId"]
 
+        # Add questions using batchUpdate
         requests = []
         for q in questions:
             requests.append({
@@ -63,13 +70,17 @@ def generate_form():
                 }
             })
 
+        # Send questions to form
         service.forms().batchUpdate(formId=form_id, body={"requests": requests}).execute()
+
+        # Return the form's edit URL
         form_url = f"https://docs.google.com/forms/d/{form_id}/edit"
         return jsonify({"success": True, "form_url": form_url})
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# Simple MCQ parser from raw text
 def parse_mcqs(text):
     questions = []
     current_q = {}
@@ -92,6 +103,7 @@ def parse_mcqs(text):
 
     return questions
 
+# Start the Flask app
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(debug=True)
 
